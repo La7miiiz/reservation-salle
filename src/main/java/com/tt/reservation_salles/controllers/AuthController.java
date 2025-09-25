@@ -1,93 +1,143 @@
 package com.tt.reservation_salles.controllers;
 
 import com.tt.reservation_salles.entities.LogHistory;
+import com.tt.reservation_salles.entities.Role;
 import com.tt.reservation_salles.entities.Utilisateur;
 import com.tt.reservation_salles.repositories.LogHistoryRepository;
 import com.tt.reservation_salles.repositories.UtilisateurRepository;
-import jakarta.servlet.http.HttpSession;
+import com.tt.reservation_salles.security.JwtUtil;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
+import java.util.Optional;
 
+
+import java.util.HashMap;
 import java.util.Map;
 
 @RestController
 @RequestMapping("/api/auth")
-@CrossOrigin(origins = "http://localhost:3000", allowCredentials = "true") // ⚡ important pour React
+@CrossOrigin(origins = "http://localhost:3000")
 public class AuthController {
 
     private final UtilisateurRepository utilisateurRepository;
     private final LogHistoryRepository logHistoryRepository;
+    private final JwtUtil jwtUtil;
+    private final AuthenticationManager authenticationManager;
 
-    public AuthController(UtilisateurRepository utilisateurRepository, LogHistoryRepository logHistoryRepository) {
+    public AuthController(UtilisateurRepository utilisateurRepository,
+                          LogHistoryRepository logHistoryRepository,
+                          PasswordEncoder passwordEncoder,
+                          JwtUtil jwtUtil,
+                          AuthenticationManager authenticationManager) {
         this.utilisateurRepository = utilisateurRepository;
         this.logHistoryRepository = logHistoryRepository;
+        this.jwtUtil = jwtUtil;
+        this.authenticationManager = authenticationManager;
     }
 
-    // SIGNUP
+    // ---------------- SIGNUP ----------------
     @PostMapping("/signup")
     public ResponseEntity<?> signup(@RequestBody Utilisateur utilisateur) {
-        if (utilisateurRepository.findByEmail(utilisateur.getEmail()).isPresent()) {
-            return ResponseEntity
-                    .badRequest()
-                    .body(Map.of("error", "Email déjà utilisé !"));
+        if (utilisateur.getMotDePasse() == null || utilisateur.getMotDePasse().isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Le mot de passe est obligatoire"));
         }
+
+        if (utilisateurRepository.findByEmail(utilisateur.getEmail()).isPresent()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Email déjà utilisé !"));
+        }
+
+        if (utilisateur.getEmail() == null || utilisateur.getEmail().isEmpty()){
+            return ResponseEntity.badRequest().body(Map.of("error", "entrez votre Email !"));
+        }
+
+        if (utilisateur.getRole() == null) {
+            utilisateur.setRole(Role.CLIENT);
+        }
+
+        if (utilisateur.getNom() == null || utilisateur.getNom().isEmpty()){
+            return ResponseEntity.badRequest().body(Map.of("error", "entrez votre nom !"));
+        }
+
+        utilisateur.setMotDePasse(utilisateur.getMotDePasse());
 
         Utilisateur savedUser = utilisateurRepository.save(utilisateur);
-
-        logHistoryRepository.save(new LogHistory("SIGNUP", savedUser.getEmail(), savedUser.getRole()));
-
-        return ResponseEntity.ok(Map.of(
-                "message", "Inscription réussie ✅",
-                "user", savedUser
-        ));
+        return ResponseEntity.ok(savedUser);
     }
 
-    // LOGIN
+
+    // ---------------- LOGIN ----------------
     @PostMapping("/login")
-    public ResponseEntity<?> login(@RequestBody Utilisateur utilisateur, HttpSession session) {
-        Utilisateur existing = utilisateurRepository.findByEmail(utilisateur.getEmail())
-                .orElse(null);
-
-        if (existing == null) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(Map.of("error", "Utilisateur non trouvé !"));
+    public ResponseEntity<?> login(@RequestBody Utilisateur utilisateur) {
+        if (utilisateur.getEmail() == null || utilisateur.getMotDePasse() == null) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(Map.of("error", "Email et mot de passe sont obligatoires"));
         }
 
-        if (!existing.getMotDePasse().equals(utilisateur.getMotDePasse())) {
+        Optional<Utilisateur> optionalUser = utilisateurRepository.findByEmail(utilisateur.getEmail());
+
+        if (optionalUser.isEmpty() || !optionalUser.get().getMotDePasse().equals(utilisateur.getMotDePasse())) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(Map.of("error", "Mot de passe incorrect !"));
+                    .body(Map.of("error", "Email ou mot de passe incorrect"));
         }
 
-        // ⚡ enregistrer l'utilisateur en session
-        session.setAttribute("user", existing);
+        Utilisateur existing = optionalUser.get();
+        logHistoryRepository.save(new LogHistory("LOGIN", existing.getEmail(), existing.getRole().name()));
 
-        logHistoryRepository.save(new LogHistory("LOGIN", existing.getEmail(), existing.getRole()));
+        String token = jwtUtil.generateToken(existing.getEmail(), existing.getRole().name());
+
+        Map<String, Object> userData = new HashMap<>();
+        userData.put("id", existing.getId());
+        userData.put("nom", existing.getNom());
+        userData.put("email", existing.getEmail());
+        userData.put("role", existing.getRole());
 
         return ResponseEntity.ok(Map.of(
                 "message", "Connexion réussie ✅ Bienvenue " + existing.getNom(),
-                "user", existing
+                "token", token,
+                "user", userData
         ));
     }
 
-    // LOGOUT
+
+
+
+
+    // ---------------- LOGOUT ----------------
     @PostMapping("/logout")
-    public ResponseEntity<?> logout(HttpSession session) {
-        Utilisateur user = (Utilisateur) session.getAttribute("user");
-        if (user != null) {
-            logHistoryRepository.save(new LogHistory("LOGOUT", user.getEmail(), user.getRole()));
+    public ResponseEntity<?> logout(@RequestHeader(value = "Authorization", required = false) String authHeader) {
+        if (authHeader != null && authHeader.startsWith("Bearer ")) {
+            String token = authHeader.substring(7);
+            try {
+                var claims = jwtUtil.validateToken(token);
+                String email = claims.getSubject();
+                utilisateurRepository.findByEmail(email)
+                        .ifPresent(user -> logHistoryRepository.save(new LogHistory("LOGOUT", user.getEmail(), user.getRole().name())));
+            } catch (Exception ignored) { }
         }
-        session.invalidate();
         return ResponseEntity.ok(Map.of("message", "Déconnexion réussie ✅"));
     }
 
-    // ⚡ Vérifier si l'utilisateur est connecté
+    // ---------------- GET CURRENT USER ----------------
     @GetMapping("/me")
-    public ResponseEntity<?> getCurrentUser(HttpSession session) {
-        Utilisateur user = (Utilisateur) session.getAttribute("user");
-        if (user == null) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Non connecté"));
+    public ResponseEntity<?> getCurrentUser(@RequestHeader("Authorization") String authHeader) {
+        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Token manquant"));
         }
-        return ResponseEntity.ok(user);
+
+        String token = authHeader.substring(7);
+        try {
+            var claims = jwtUtil.validateToken(token);
+            String email = claims.getSubject();
+            Utilisateur user = utilisateurRepository.findByEmail(email).orElse(null);
+            if (user == null) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Utilisateur non trouvé"));
+            }
+            return ResponseEntity.ok(user);
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Token invalide"));
+        }
     }
 }
