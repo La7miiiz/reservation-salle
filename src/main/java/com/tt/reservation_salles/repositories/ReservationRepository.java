@@ -7,7 +7,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import java.time.LocalDateTime;
 import java.util.List;
 
-public interface ReservationRepository extends JpaRepository<Reservation, Long> {
+public interface    ReservationRepository extends JpaRepository<Reservation, Long> {
 
     List<Reservation> findByDateFinBeforeAndStatut(LocalDateTime dateTime, StatutReservation statut);
 
@@ -19,4 +19,8 @@ public interface ReservationRepository extends JpaRepository<Reservation, Long> 
 
     // 🔹 Filtrées aussi par statut
     List<Reservation> findByUtilisateurIdAndStatut(Long utilisateurId, StatutReservation statut);
+
+    boolean existsBySalleIdAndDateDebutBeforeAndDateFinAfter(
+            Long salleId, LocalDateTime dateFin, LocalDateTime dateDebut);
+
 }

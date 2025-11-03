@@ -1,0 +1,31 @@
+import { Injectable } from '@angular/core';
+import axios from 'axios';
+
+@Injectable({
+  providedIn: 'root'
+})
+export class AuthService {
+  private apiUrl = 'http://localhost:8080/api/auth';
+
+  async login(email: string, password: string) {
+    const res = await axios.post(`${this.apiUrl}/login`, { email, password });
+    localStorage.setItem('token', res.data.token);
+    return res.data;
+  }
+
+  async register(user: any) {
+    return axios.post(`${this.apiUrl}/register`, user);
+  }
+
+  logout() {
+    localStorage.removeItem('token');
+  }
+
+  getToken() {
+    return localStorage.getItem('token');
+  }
+
+  isLoggedIn(): boolean {
+    return !!this.getToken();
+  }
+}

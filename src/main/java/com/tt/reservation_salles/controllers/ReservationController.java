@@ -7,7 +7,7 @@ import com.tt.reservation_salles.entities.StatutReservation;
 import com.tt.reservation_salles.repositories.ReservationRepository;
 import com.tt.reservation_salles.repositories.SalleRepository;
 import com.tt.reservation_salles.repositories.UtilisateurRepository;
-import com.tt.reservation_salles.security.JwtUtil; // Import JwtUtil
+import com.tt.reservation_salles.security.JwtUtil;
 import io.jsonwebtoken.Claims;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -26,12 +26,12 @@ public class ReservationController {
     private final ReservationRepository reservationRepository;
     private final UtilisateurRepository utilisateurRepository;
     private final SalleRepository salleRepository;
-    private final JwtUtil jwtUtil; // Inject JwtUtil
+    private final JwtUtil jwtUtil;
 
     public ReservationController(ReservationRepository reservationRepository,
                                  UtilisateurRepository utilisateurRepository,
                                  SalleRepository salleRepository,
-                                 JwtUtil jwtUtil) { // Add to constructor
+                                 JwtUtil jwtUtil) {
         this.reservationRepository = reservationRepository;
         this.utilisateurRepository = utilisateurRepository;
         this.salleRepository = salleRepository;
@@ -49,9 +49,9 @@ public class ReservationController {
                 .orElseThrow(() -> new RuntimeException("❌ Utilisateur non trouvé !"));
     }
 
-    // ✅ GET toutes les réservations
+    // ✅ GET toutes les réservations (ADMIN uniquement)
     @GetMapping
-    @PreAuthorize("hasAuthority('ADMIN')") // Only ADMINs can get all reservations
+    @PreAuthorize("hasAuthority('ADMIN')")
     public List<Reservation> getAll() {
         return reservationRepository.findAll();
     }
@@ -61,19 +61,25 @@ public class ReservationController {
     public ResponseEntity<Reservation> create(@RequestBody Map<String, Object> payload,
                                               @RequestHeader("Authorization") String authHeader) {
         Utilisateur utilisateur = extractUserFromToken(authHeader);
+
         Long salleId = Long.parseLong(payload.get("salleId").toString());
         LocalDateTime dateDebut = LocalDateTime.parse(payload.get("dateDebut").toString());
         LocalDateTime dateFin = LocalDateTime.parse(payload.get("dateFin").toString());
 
+        if (dateDebut.isAfter(dateFin) || dateDebut.isEqual(dateFin)) {
+            throw new RuntimeException("❌ La date de début doit être avant la date de fin !");
+        }
+
         Salle salle = salleRepository.findById(salleId)
                 .orElseThrow(() -> new RuntimeException("❌ Salle invalide !"));
 
-        if (!salle.isDisponible()) {
-            throw new RuntimeException("❌ Salle déjà occupée !");
+        // 🚨 Vérifier si un conflit existe
+        boolean conflict = reservationRepository.existsBySalleIdAndDateDebutBeforeAndDateFinAfter(
+                salleId, dateFin, dateDebut
+        );
+        if (conflict) {
+            throw new RuntimeException("❌ La salle est déjà réservée sur cet intervalle !");
         }
-
-        salle.setDisponible(false); // occuper la salle
-        salleRepository.save(salle); // Save the updated salle status
 
         Reservation reservation = new Reservation();
         reservation.setUtilisateur(utilisateur);
@@ -91,30 +97,35 @@ public class ReservationController {
                                          @RequestBody Map<String, Object> payload,
                                          @RequestHeader("Authorization") String authHeader) {
         Utilisateur utilisateur = extractUserFromToken(authHeader);
-        Optional<Reservation> opt = reservationRepository.findById(id);
+        Reservation reservation = reservationRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("❌ Réservation non trouvée !"));
 
-        if (opt.isEmpty()) {
-            throw new RuntimeException("❌ Réservation non trouvée !");
-        }
-
-        Reservation reservation = opt.get();
-        // Check if the user is the owner of the reservation or is an ADMIN
-        if (!reservation.getUtilisateur().getId().equals(utilisateur.getId()) && !utilisateur.getRole().name().equals("ADMIN")) {
+        // Vérifier droits
+        if (!reservation.getUtilisateur().getId().equals(utilisateur.getId()) &&
+                !utilisateur.getRole().name().equals("ADMIN")) {
             throw new RuntimeException("⚠️ Vous ne pouvez pas modifier une réservation qui ne vous appartient pas !");
         }
 
         // 🔹 Mise à jour de la salle
         if (payload.containsKey("salleId")) {
             Long nouvelleSalleId = Long.parseLong(payload.get("salleId").toString());
+            LocalDateTime dateDebut = payload.containsKey("dateDebut")
+                    ? LocalDateTime.parse(payload.get("dateDebut").toString())
+                    : reservation.getDateDebut();
+            LocalDateTime dateFin = payload.containsKey("dateFin")
+                    ? LocalDateTime.parse(payload.get("dateFin").toString())
+                    : reservation.getDateFin();
+
+            boolean conflict = reservationRepository.existsBySalleIdAndDateDebutBeforeAndDateFinAfter(
+                    nouvelleSalleId, dateFin, dateDebut
+            );
+            if (conflict && !reservation.getSalle().getId().equals(nouvelleSalleId)) {
+                throw new RuntimeException("❌ La nouvelle salle est déjà réservée sur cet intervalle !");
+            }
+
             Salle nouvelleSalle = salleRepository.findById(nouvelleSalleId)
                     .orElseThrow(() -> new RuntimeException("❌ Salle invalide !"));
-            if (nouvelleSalle.isDisponible()) {
-                reservation.getSalle().setDisponible(true); // libérer l’ancienne salle
-                nouvelleSalle.setDisponible(false); // occuper la nouvelle salle
-                reservation.setSalle(nouvelleSalle);
-            } else {
-                throw new RuntimeException("❌ Salle déjà occupée !");
-            }
+            reservation.setSalle(nouvelleSalle);
         }
 
         // 🔹 Mise à jour des dates
@@ -152,21 +163,15 @@ public class ReservationController {
         }
 
         reservation.setStatut(StatutReservation.ANNULEE);
-        reservation.getSalle().setDisponible(true); // libérer la salle
-        salleRepository.save(reservation.getSalle()); // Save the updated salle status
-
         return reservationRepository.save(reservation);
     }
 
-    // ✅ DELETE supprimer une réservation (réservé aux ADMIN)
+    // ✅ DELETE supprimer une réservation (ADMIN uniquement)
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAuthority('ADMIN')") // Use Spring Security for role check
+    @PreAuthorize("hasAuthority('ADMIN')")
     public void deleteReservation(@PathVariable Long id) {
         Reservation reservation = reservationRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("❌ Réservation non trouvée !"));
-
-        reservation.getSalle().setDisponible(true); // libérer la salle
-        salleRepository.save(reservation.getSalle()); // Save the updated salle status
         reservationRepository.delete(reservation);
     }
 
