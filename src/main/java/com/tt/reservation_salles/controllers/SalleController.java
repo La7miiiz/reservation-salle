@@ -11,7 +11,8 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
-@CrossOrigin(origins = "http://localhost:3000", allowCredentials = "true")
+@CrossOrigin(origins = {"http://localhost:4200"}, allowCredentials = "true")
+
 @RestController
 @RequestMapping("/api/salles")
 public class SalleController {

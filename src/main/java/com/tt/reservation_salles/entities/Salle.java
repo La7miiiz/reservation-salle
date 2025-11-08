@@ -19,6 +19,7 @@ public class Salle {
 
     private String nom;
     private int capacite;
+    private String description;
     private boolean disponible = true;
 
     @OneToMany(mappedBy = "salle")
