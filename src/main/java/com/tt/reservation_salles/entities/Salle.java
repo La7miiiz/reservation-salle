@@ -1,5 +1,6 @@
 package com.tt.reservation_salles.entities;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -20,8 +21,8 @@ public class Salle {
     private String nom;
     private int capacite;
     private String description;
-    private boolean disponible = true;
 
     @OneToMany(mappedBy = "salle")
+    @JsonIgnore
     private List<Reservation> reservations;
 }

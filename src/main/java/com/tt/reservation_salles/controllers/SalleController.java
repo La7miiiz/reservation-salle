@@ -71,7 +71,6 @@ public class SalleController {
 
         salle.setNom(salleDetails.getNom());
         salle.setCapacite(salleDetails.getCapacite());
-        salle.setDisponible(salleDetails.isDisponible());
 
         return salleRepository.save(salle);
     }

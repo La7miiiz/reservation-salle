@@ -1,5 +1,6 @@
 package com.tt.reservation_salles.entities;
 
+import com.fasterxml.jackson.annotation.JsonBackReference;
 import jakarta.persistence.*;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -17,12 +18,13 @@ public class Reservation {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
-
+    private String nom;
     private LocalDateTime dateDebut;
     private LocalDateTime dateFin;
 
     @ManyToOne
     @JoinColumn(name = "salle_id")
+    @JsonBackReference
     private Salle salle;
 
     @ManyToOne

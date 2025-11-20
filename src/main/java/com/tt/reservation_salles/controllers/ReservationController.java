@@ -18,7 +18,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-@CrossOrigin(origins = {"http://localhost:4200", "http://localhost:3000"}, allowCredentials = "true")
+@CrossOrigin(origins = {"http://localhost:4200"}, allowCredentials = "true")
 
 @RestController
 @RequestMapping("/api/reservations")
@@ -74,7 +74,7 @@ public class ReservationController {
         Salle salle = salleRepository.findById(salleId)
                 .orElseThrow(() -> new RuntimeException("❌ Salle invalide !"));
 
-        // 🚨 Vérifier si un conflit existe
+
         boolean conflict = reservationRepository.existsBySalleIdAndDateDebutBeforeAndDateFinAfter(
                 salleId, dateFin, dateDebut
         );
@@ -82,14 +82,32 @@ public class ReservationController {
             throw new RuntimeException("❌ La salle est déjà réservée sur cet intervalle !");
         }
 
+        // Mark as unavailable and save
+        salleRepository.save(salle);
+
         Reservation reservation = new Reservation();
         reservation.setUtilisateur(utilisateur);
         reservation.setSalle(salle);
+        reservation.setNom(salle.getNom());
         reservation.setDateDebut(dateDebut);
         reservation.setDateFin(dateFin);
         reservation.setStatut(StatutReservation.ACTIVE);
 
         return ResponseEntity.ok(reservationRepository.save(reservation));
+    }
+    @GetMapping("/{id}")
+    public Reservation getReservationById(@PathVariable Long id,
+                                          @RequestHeader("Authorization") String authHeader) {
+        Utilisateur utilisateur = extractUserFromToken(authHeader);
+        Reservation reservation = reservationRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("❌ Réservation non trouvée !"));
+
+        boolean isAdmin = utilisateur.getRole().name().equals("ADMIN");
+        boolean isOwner = reservation.getUtilisateur().getId().equals(utilisateur.getId());
+        if (!isOwner && !isAdmin) {
+            throw new RuntimeException("⚠️ Vous ne pouvez pas consulter une réservation qui ne vous appartient pas !");
+        }
+        return reservation;
     }
 
     // ✅ PUT mise à jour d’une réservation
@@ -102,34 +120,22 @@ public class ReservationController {
                 .orElseThrow(() -> new RuntimeException("❌ Réservation non trouvée !"));
 
         // Vérifier droits
-        if (!reservation.getUtilisateur().getId().equals(utilisateur.getId()) &&
-                !utilisateur.getRole().name().equals("ADMIN")) {
+        boolean isAdmin = utilisateur.getRole().name().equals("ADMIN");
+        boolean isOwner = reservation.getUtilisateur().getId().equals(utilisateur.getId());
+        if (!isOwner && !isAdmin) {
             throw new RuntimeException("⚠️ Vous ne pouvez pas modifier une réservation qui ne vous appartient pas !");
         }
 
-        // 🔹 Mise à jour de la salle
+        // Mise à jour de la salle
         if (payload.containsKey("salleId")) {
             Long nouvelleSalleId = Long.parseLong(payload.get("salleId").toString());
-            LocalDateTime dateDebut = payload.containsKey("dateDebut")
-                    ? LocalDateTime.parse(payload.get("dateDebut").toString())
-                    : reservation.getDateDebut();
-            LocalDateTime dateFin = payload.containsKey("dateFin")
-                    ? LocalDateTime.parse(payload.get("dateFin").toString())
-                    : reservation.getDateFin();
-
-            boolean conflict = reservationRepository.existsBySalleIdAndDateDebutBeforeAndDateFinAfter(
-                    nouvelleSalleId, dateFin, dateDebut
-            );
-            if (conflict && !reservation.getSalle().getId().equals(nouvelleSalleId)) {
-                throw new RuntimeException("❌ La nouvelle salle est déjà réservée sur cet intervalle !");
-            }
-
             Salle nouvelleSalle = salleRepository.findById(nouvelleSalleId)
                     .orElseThrow(() -> new RuntimeException("❌ Salle invalide !"));
             reservation.setSalle(nouvelleSalle);
+            reservation.setNom(nouvelleSalle.getNom());
         }
 
-        // 🔹 Mise à jour des dates
+        // Mise à jour des dates
         if (payload.containsKey("dateDebut")) {
             reservation.setDateDebut(LocalDateTime.parse(payload.get("dateDebut").toString()));
         }
@@ -137,33 +143,14 @@ public class ReservationController {
             reservation.setDateFin(LocalDateTime.parse(payload.get("dateFin").toString()));
         }
 
-        // 🔹 Mise à jour du statut
+        // Seul l'admin peut modifier le statut
         if (payload.containsKey("statut")) {
+            if (!isAdmin) {
+                throw new RuntimeException("⚠️ Seul un administrateur peut changer le statut d'une réservation !");
+            }
             reservation.setStatut(StatutReservation.valueOf(payload.get("statut").toString().toUpperCase()));
         }
 
-        return reservationRepository.save(reservation);
-    }
-
-    // ✅ PUT annuler ma réservation
-    @PutMapping("/me/{id}/annuler")
-    public Reservation annulerMaReservation(@PathVariable Long id,
-                                            @RequestHeader("Authorization") String authHeader) {
-        Utilisateur user = extractUserFromToken(authHeader);
-
-        Reservation reservation = reservationRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("❌ Réservation non trouvée !"));
-
-        if (!reservation.getUtilisateur().getId().equals(user.getId())) {
-            throw new RuntimeException("⚠️ Vous ne pouvez pas annuler une réservation qui ne vous appartient pas !");
-        }
-
-        if (reservation.getStatut() == StatutReservation.EXPIREE ||
-                reservation.getStatut() == StatutReservation.ANNULEE) {
-            throw new RuntimeException("⚠️ La réservation est déjà terminée ou annulée.");
-        }
-
-        reservation.setStatut(StatutReservation.ANNULEE);
         return reservationRepository.save(reservation);
     }
 
@@ -175,6 +162,7 @@ public class ReservationController {
                 .orElseThrow(() -> new RuntimeException("❌ Réservation non trouvée !"));
         reservationRepository.delete(reservation);
     }
+
 
     // ✅ Historique du user connecté
     @GetMapping("/me")
