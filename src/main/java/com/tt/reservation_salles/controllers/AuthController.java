@@ -38,7 +38,6 @@ public class AuthController {
         this.authenticationManager = authenticationManager;
     }
 
-    // ---------------- SIGNUP ----------------
     @PostMapping("/signup")
     public ResponseEntity<?> signup(@RequestBody Utilisateur utilisateur) {
         if (utilisateur.getMotDePasse() == null || utilisateur.getMotDePasse().isEmpty()) {
@@ -68,7 +67,6 @@ public class AuthController {
     }
 
 
-    // ---------------- LOGIN ----------------
     @PostMapping("/login")
     public ResponseEntity<?> login(@RequestBody Utilisateur utilisateur) {
         if (utilisateur.getEmail() == null || utilisateur.getMotDePasse() == null) {
@@ -105,7 +103,6 @@ public class AuthController {
 
 
 
-    // ---------------- LOGOUT ----------------
     @PostMapping("/logout")
     public ResponseEntity<?> logout(@RequestHeader(value = "Authorization", required = false) String authHeader) {
         if (authHeader != null && authHeader.startsWith("Bearer ")) {

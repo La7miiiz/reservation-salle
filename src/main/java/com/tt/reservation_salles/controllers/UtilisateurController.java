@@ -108,15 +108,36 @@ public class UtilisateurController {
 
     // PUT: Update current user's profile
     @PutMapping("/me")
-    public Utilisateur updateMe(@RequestBody Utilisateur changes,
+    public Utilisateur updateMe(@RequestBody Map<String, Object> changes,
                                 @RequestHeader("Authorization") String authHeader) {
         Utilisateur user = extractUserFromToken(authHeader);
-        if (changes.getNom() != null) user.setNom(changes.getNom());
-        if (changes.getEmail() != null) user.setEmail(changes.getEmail());
-        if (changes.getAvatarSeed() != null) user.setAvatarSeed(changes.getAvatarSeed());
-        // TODO: Secure password hash if you add password changes
+
+        // Update name
+        if (changes.get("nom") != null) user.setNom((String) changes.get("nom"));
+
+        // Update email
+        if (changes.get("email") != null) user.setEmail((String) changes.get("email"));
+
+        // Update avatarSeed
+        if (changes.get("avatarSeed") != null) user.setAvatarSeed((String) changes.get("avatarSeed"));
+
+        // Password update with old password check (insecure/plaintext example)
+        if (changes.get("oldPassword") != null && changes.get("newPassword") != null) {
+            String oldPassword = (String) changes.get("oldPassword");
+            String newPassword = (String) changes.get("newPassword");
+            if (!oldPassword.isBlank() && !newPassword.isBlank()) {
+                // NOTE: In a real app, compare hash, not plaintext!
+                if (user.getMotDePasse().equals(oldPassword)) {
+                    user.setMotDePasse(newPassword);
+                } else {
+                    throw new RuntimeException("L'ancien mot de passe est incorrect.");
+                }
+            }
+        }
+
         return utilisateurRepository.save(user);
     }
+
 
     // --- ADMIN DASHBOARD STATS ---
 

@@ -16,7 +16,6 @@ import org.springframework.web.bind.annotation.*;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 
 @CrossOrigin(origins = {"http://localhost:4200"}, allowCredentials = "true")
 
@@ -156,10 +155,15 @@ public class ReservationController {
 
     // ✅ DELETE supprimer une réservation (ADMIN uniquement)
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAuthority('ADMIN')")
-    public void deleteReservation(@PathVariable Long id) {
+    public void deleteReservation(@PathVariable Long id, @RequestHeader("Authorization") String authHeader) {
+        Utilisateur user = extractUserFromToken(authHeader);
         Reservation reservation = reservationRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("❌ Réservation non trouvée !"));
+        boolean isAdmin = user.getRole().name().equals("ADMIN");
+        boolean isOwner = reservation.getUtilisateur().getId().equals(user.getId());
+        if (!isAdmin && !isOwner) {
+            throw new RuntimeException("⚠️ Vous ne pouvez supprimer que vos propres réservations !");
+        }
         reservationRepository.delete(reservation);
     }
 
